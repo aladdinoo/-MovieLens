@@ -7,8 +7,9 @@ STEPS:
 2. Data Exploration
 3. Manual Predictions Creation
 4. Matrix Factorization using the Recosystem model
+6-Result
 OUTPUT:
-A predictive model for movie ratings achieving an RMSE of 0.7738297
+A predictive model for movie ratings achieving an RMSE of 0.7792515
 ESTIMATED RUNTIME: ~5 hour
 AUTHOR: Alaa Eddine Bouchikhi
 YEAR: 2024
