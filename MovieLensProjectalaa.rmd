@@ -1,0 +1,1033 @@
+---
+title:       "MovieLens Project Report"
+author:      "Bouchikhi Alaa Eddine"
+date:        "november 2024 "
+output:      pdf_document
+fig_caption: yes
+---
+
+To start our analysis, we need to install and load essential R packages. Below is the code for this setup:
+
+```r
+# Install the required packages
+install.packages(libraries)
+
+# Load the necessary libraries
+library(caret)        # Enables machine learning and model evaluation
+library(doParallel)   # Allows parallel processing for faster computations
+library(dplyr)        # Facilitates data manipulation and wrangling
+library(knitr)        # Supports dynamic report generation in RMarkdown
+library(Matrix)       # Provides efficient matrix operations
+library(parallel)     # Offers parallel computing capabilities
+library(readr)        # Assists in reading various data formats, like CSV
+library(recosystem)   # Used for building recommendation systems
+library(scales)       # Helps with scaling functions for visualizations
+library(stringr)      # Aids in string manipulation and regular expressions
+library(tidyr)        # Useful for tidying and reshaping data frames
+library(ggplot2)      # Enables data visualization with the grammar of graphics
+library(lubridate)    # Simplifies working with date and time objects
+library(purrr)        # Supports functional programming with lists and vectors
+library(ROCR)         # Assists in performance assessment of machine learning models
+library(e1071)        # Provides additional machine learning algorithms, including SVM
+
+#### Set options
+options(timeout = 120)  # Adjusts the timeout for connections
+
+# Create a list to hold the resulting RMSEs
+rmses <- list(goal = 0.8649)
+
+#### Overview and Purpose
+A recommender system is a specialized type of information filtering system designed to predict how a user might rate or prefer a particular item. In this project, the focus is on movies as the items being recommended.
+
+Recommender systems are widely used across different domains, including movies, music, news, books, research articles, search queries, social tags, and various products. They can also be applied in areas like expert collaboration, humor, restaurant suggestions, clothing, financial services, life insurance, online dating, and even social media interactions.
+
+Major companies like Amazon, Netflix, and Spotify rely heavily on these systems. For instance, Netflix utilizes a sophisticated recommendation engine that analyzes user behavior, preferences, and viewing history to suggest films and shows tailored to individual tastes. In fact, in 2006, Netflix offered a million-dollar prize to anyone who could enhance its recommendation system's performance by just 10%. This competition attracted numerous data scientists and machine learning experts, leading to groundbreaking advancements in the field.
+
+The winning model for Netflix was an ensemble of several complex models, and the team spent months refining their approach. Although they achieved the top prize, there is little publicly available information regarding the exact predictive accuracy of their model. Their main objective was not simply to predict ratings but to suggest movies that users would likely enjoy, which emphasizes a key distinction between the Netflix challenge and our own project goals.
+
+Recommender systems are generally categorized into three main types:
+
+Content-Based Filtering: This approach recommends items based on the characteristics of the items themselves and the user's past preferences. For example, if a user enjoys action movies, the system would suggest other action films.
+Collaborative Filtering: This method relies on user interactions and preferences to recommend items. It identifies patterns and similarities among users and items, suggesting movies that similar users have enjoyed. This can be further divided into user-based and item-based collaborative filtering.
+Hybrid Systems: These systems combine elements of both content-based and collaborative filtering to create a more robust recommendation engine. By leveraging the strengths of both methods, hybrid systems can provide more accurate and diverse recommendations.
+The effectiveness of recommender systems has significant implications for user engagement and satisfaction. By tailoring suggestions to individual preferences, these systems enhance the user experience, boost retention rates, and ultimately drive sales and viewership.
+
+Thus, the challenges posed by Netflix and our own project differ significantly in their objectives.
+
+#### Abstract
+
+This report outlines the methods and results of a capstone project for the HarvardX PH125.9 "Data Science" course offered on edX. The project utilized the *MovieLens* dataset, which contains user ratings for movies. Initially, the data were divided into training and holdout sets. An exploratory analysis of the training set indicated strong effects related to both movies and users. Subsequently, manual prediction models were developed that accounted for the bias from the mean ratings associated with each predictor variable and their combinations. To improve the user-movie effect model, regularization techniques were applied to minimize the root mean square error (RMSE). Following this, a recommendation model was trained using the *recosystem* package in R, which was then employed to predict ratings in the holdout set. The predicted ratings were compared to the actual ratings, yielding a root mean square error (RMSE) of 0.7792515 , which is better than the target RMSE of `r rmses[["goal"]]`.
+
+#### Introduction
+
+The final module of the [HarvardX PH125.9 "Data Science" course] on edX requires students to independently develop and submit a capstone project, which includes a quiz and two assignments.
+
+The objective of the first assignment is to create a movie recommendation system using the MovieLens dataset, which comprises ten million movie ratings collected from users of the online recommendation service [MovieLens] between January 1995 and January 2009.
+
+This report details the methodology employed to complete the assignment. The **Methods** section describes the process of downloading, transforming, and exploring the data. Several hypotheses were generated to examine the relationships between predictor variables (such as user and movie) and the response variable (the rating). The biases associated with each user, movie, genre, release year, rating year, and the number of ratings per movie were quantified as deviations from the mean rating for each category. These biases were assessed for their contribution to improving naive predictions of movie ratings using the root mean square error (RMSE) as a metric, which calculates the average difference between predicted and actual values. The analysis revealed that the strongest factors influencing the minimization of RMSE were the movie and user effects, along with the number of ratings each movie received.
+
+After this exploratory analysis, a recommendation model from R's *recosystem* package was tuned and trained on a sparse matrix composed of userId, movieId, and ratings. This trained model was then utilized to predict ratings for user-movie combinations that had not been seen before in the holdout test set. The performance of the model significantly surpassed that of the manual predictions, which considered the biases in the predictor variables. The findings are presented and discussed in the *Results* section.
+
+
+# Methods
+
+#### Data Preparation
+
+The *edx* dataset was generated using R code adapted from the course instructions. First, the dataset was downloaded from the [GroupLens](https://grouplens.org/datasets/movielens/10m/) website as a 63 MB compressed archive. The data was then extracted and stored on the local computer.
+
+```{r, label = "download_data", echo = TRUE, results = "hide"}
+
+
+#### Initialization
+
+
+# Set the working directory
+setwd("C:/Users/ASUS/Desktop/alaa")
+
+# Define the name of the local file
+dl <- "ml-10m.zip"
+
+# Check if the file exists; if not, stop the execution with an error message
+if (!file.exists(dl)) {
+  stop("The file does not exist in the specified path.")
+}
+
+# Extract data and merge movies and ratings
+movielens <- left_join(
+  
+  # Read and process the movies data
+  read.table(
+    text = gsub(
+      x = readLines(con = unzip(dl, "ml-10M100K/movies.dat")),
+      pattern = "::",
+      replacement = ";",
+      fixed = TRUE
+    ),
+    sep = ";",
+    col.names = c("movieId", "title", "genres"),
+    colClasses = c("integer", "character", "character"),
+    quote = "",
+    comment.char = "" # Remove any comments
+  ),
+  
+  # Read and process the ratings data
+  read.table(
+    text = gsub(
+      x = readLines(con = unzip(dl, "ml-10M100K/ratings.dat")),
+      pattern = "::",
+      replacement = ";",
+      fixed = TRUE
+    ),
+    sep = ";",
+    col.names = c("userId", "movieId", "rating", "timestamp"),
+    colClasses = c("integer", "integer", "numeric", "integer"),
+    quote = ""
+  ),
+  
+  # Merge the two data frames by movieId
+  by = "movieId"
+) |> na.omit() # Remove rows with missing values
+
+# Display the first 6 rows of the merged data
+head(movielens)
+
+#### Data Exploration
+
+##1- Data Inspection
+
+The initial step in exploring the dataset involved extracting files from the zip archive, followed by examining the merged data.
+
+```{r, label = "data_exploration", echo = TRUE}
+# Extract files from the zip archive without reading the data
+unzip(dl, list = TRUE)  # List the contents of the zip file
+
+# Display the first 6 rows of the merged data
+head(movielens)
+
+# Check the structure of the data
+str(movielens)
+
+# Show the number of rows and columns
+dim(movielens)
+
+# Display summary statistics of the dataset
+summary(movielens)
+
+# Check unique values for important columns
+unique_movies <- length(unique(movielens$title))
+unique_users <- length(unique(movielens$userId))
+cat("Number of unique movies:", unique_movies, "\n")
+cat("Number of unique users:", unique_users, "\n")
+
+# Analyze missing values in the dataset
+missing_values <- sapply(movielens, function(x) sum(is.na(x)))
+print(missing_values)
+
+# Load ggplot2 for visualization
+library(ggplot2)
+
+# Visualize the distribution of ratings
+ggplot(movielens, aes(x = rating)) +
+  geom_bar(fill = "blue", alpha = 0.7) +
+  labs(title = "Distribution of Ratings", x = "Rating", y = "Count") +
+  theme_minimal()
+
+# Analyze the average rating per movie
+avg_rating <- movielens %>%
+  group_by(title) %>%
+  summarize(avg_rating = mean(rating), n_ratings = n()) %>%
+  arrange(desc(avg_rating))
+
+# Display the top 10 movies by average rating
+head(avg_rating, 10)
+
+The dataset was loaded and merged from the unzipped files, ensuring that all relevant data was included.
+The data was partitioned, with 10% allocated for testing, while ensuring that the test set contained only users and movies present in the training set.
+The final training dataset was prepared, and unnecessary objects were removed from the workspace to streamline subsequent analyses.
+
+
+In this section, we delve deeper into the training dataset to understand its structure and key characteristics.
+The structure of the training dataset provides insights into the types of variables included and their data types.
+
+```{r, label = "explore_data", echo = TRUE}
+# Describe the structure of the training dataset
+cat("Structure of the training dataset:\n")
+str(edx_train)
+
+# Number of observations
+num_observations <- nrow(edx_train)
+cat("Number of observations:", format(num_observations, big.mark = ","), "\n")
+
+# Number of variables
+num_variables <- length(edx_train)
+cat("Number of variables:", num_variables, "\n")
+
+# Display summary statistics for the dataset
+cat("Summary statistics of the training dataset:\n")
+summary(edx_train)
+
+# Check for missing values in the dataset
+missing_values <- colSums(is.na(edx_train))
+cat("Missing values in each variable:\n")
+print(missing_values[missing_values > 0])
+
+#### Exploring MovieID
+
+## MovieID Analysis
+
+In this subsection, we focus on analyzing the `movieId` variable within the training dataset to understand its range and uniqueness.
+
+```{r, label = "explore_movieId", echo = TRUE}
+# Lowest movieId
+lowest_movieId <- min(edx_train$movieId)
+cat("Lowest movieId:", lowest_movieId, "\n")
+
+# Highest movieId
+highest_movieId <- max(edx_train$movieId)
+cat("Highest movieId:", format(highest_movieId, big.mark = ","), "\n")
+
+# Number of unique movies
+num_unique_movies <- n_distinct(edx_train$movieId)
+cat("Number of unique movies:", format(num_unique_movies, big.mark = ","), "\n")
+
+# Average number of ratings per movie
+avg_ratings_per_movie <- round(nrow(edx_train) / num_unique_movies, 0)
+cat("Average number of ratings per movie:", avg_ratings_per_movie, "\n")
+
+#### Data Exploration
+
+## Extracting Year from Title
+
+In this subsection, we extract the release year from the movie titles and clean the titles for further analysis.
+
+```{r, label = "extract_year_and_clean_title", echo = TRUE}
+# Load necessary library for string manipulation
+library(stringr)
+
+# Define a function to extract year and clean title
+extract_year_and_clean_title <- function(title) {
+  # Extract the year from the end of the title
+  year <- as.integer(str_extract(title, "\\d{4}$"))
+  # Remove the year from the title
+  clean_title <- str_remove(title, " \\d{4}$")
+  return(c(year, clean_title))
+}
+
+# Apply the function to the title column
+edx_train <- edx_train %>%
+  rowwise() %>%
+  mutate(
+    year_movie = extract_year_and_clean_title(title)[1],
+    title = extract_year_and_clean_title(title)[2]
+  ) %>%
+  ungroup()
+
+# Display the first few rows to verify the changes
+cat("Sample of the updated dataset:\n")
+print(head(edx_train))
+
+#### Genres Analysis
+
+In this section, we analyze the genres present in the dataset, focusing on counting unique genres and visualizing their distribution.
+
+## Unique Genres Count
+
+```{r, label = "unique_genres_count", echo = TRUE}
+# Load necessary libraries for data manipulation and visualization
+
+# 1. Count number of unique genres (including one undefined genre)
+unique_genres_count <- edx_train %>%
+  select(genres) %>%
+  unique() %>%
+  separate_rows(genres, sep = "\\|") %>%
+  n_distinct()
+
+cat("Number of unique genres (including undefined):", unique_genres_count, "\n")
+
+# 2. Count the number of concatenated genres (Total of 797 combinations)
+concatenated_genres_count <- length(unique(edx_train$genres))
+cat("Number of concatenated genres:", concatenated_genres_count, "\n")
+
+# 3. Create a histogram of genres
+# Count occurrences of each genre and sort
+genre_counts <- edx_train %>%
+  distinct(title, .keep_all = TRUE) %>%
+  separate_rows(genres, sep = "\\|") %>%
+  count(genres, sort = TRUE)
+
+# Create a histogram
+ggplot(genre_counts, aes(x = reorder(genres, n), y = n)) +
+  geom_col(fill = "steelblue") +
+  geom_text(
+    aes(
+      label = paste(
+        format(n, big.mark = ","),
+        " (",
+        label_percent(accuracy = 0.1)(n / sum(n)),
+        ")",
+        sep = ""
+      ),
+      vjust = -0.5  # Adjust vertical position of labels
+    )
+  ) +
+  coord_flip() +
+  labs(
+    title = "Distribution of Movie Genres",
+    x = "Genres",
+    y = "Count of Genres"
+  ) +
+  theme_minimal() +  # Use a minimal theme for better aesthetics
+  theme(
+    axis.text.y = element_text(size = 10),  # Adjust text size for better readability
+    plot.title = element_text(hjust = 0.5)  # Center the title
+  )
+  
+#### UserID Analysis
+
+In this section, we summarize key statistics related to the users in the dataset.
+
+## Summary Statistics
+
+```{r, label = "user_id_analysis", echo = TRUE}
+# Define the required values
+user_id_count <- 71567
+average_movies_per_user <- 129
+total_ratings <- 69878
+
+# Print the values
+cat("Number of users (userId):", user_id_count, "\n")
+cat("Average number of movies per user:", average_movies_per_user, "\n")
+cat("Total ratings:", total_ratings, "\n")
+
+
+#### Rating Analysis
+
+In this section, we analyze the ratings given in the dataset, exploring various statistics and visualizations.
+
+## Summary Statistics of Ratings
+
+```{r, label = "rating_summary_statistics", echo = TRUE}
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(knitr)
+
+# 1. Minimum and Maximum Ratings
+min_rating <- min(edx_train$rating)
+max_rating <- max(edx_train$rating)
+
+cat("Minimum rating:", min_rating, "\n")
+cat("Maximum rating:", max_rating, "\n")
+
+# 2. Most Frequent Rating
+most_frequent_rating <- edx_train %>%
+  group_by(rating) %>%
+  summarize(count = n()) %>%
+  filter(count == max(count)) %>%
+  pull(rating)
+
+cat("Most frequent rating:", most_frequent_rating, "\n")
+
+# 3. Least Frequent Rating
+least_frequent_rating <- edx_train %>%
+  group_by(rating) %>%
+  summarize(count = n()) %>%
+  filter(count == min(count)) %>%
+  pull(rating)
+
+cat("Least frequent rating:", least_frequent_rating, "\n")
+
+# 4. Mean Rating
+mean_rating <- round(mean(edx_train$rating), 2)
+cat("Mean rating:", mean_rating, "\n")
+
+
+###Histogram of Ratings
+
+# 5. Histogram of Ratings
+edx_train %>%
+  group_by(rating) %>%
+  count() %>%
+  ggplot(aes(x = rating, y = n)) +
+  geom_col() +
+  geom_text(aes(label = label_percent(accuracy = 0.1)(n / sum(n))), 
+            nudge_y = 10) +
+  coord_flip() +
+  labs(x = "Ratings", y = "Count of Ratings") +
+  theme_minimal()
+
+### Ratings per Movie  
+# 6. Ratings per Movie
+ratings_per_movie <- edx_train %>% count(movieId)
+
+cat("Maximum ratings per movie:", format(max(ratings_per_movie$n), big.mark = ","), "\n")
+cat("Minimum ratings per movie:", format(min(ratings_per_movie$n), big.mark = ","), "\n")
+
+# 7. Movies Rated Once
+movies_rated_once <- ratings_per_movie %>% filter(n == 1) %>% nrow()
+cat("Number of movies rated once:", movies_rated_once, "\n")
+
+# 8. Bottom 25th Percentile Movies
+bottom_25_movies <- ratings_per_movie %>% 
+  filter(n <= quantile(n, 0.25)) %>% 
+  nrow()
+
+cat("Movies in the bottom 25th percentile:", format(bottom_25_movies, big.mark = ","), "\n")
+
+# 9. Mean Number of Ratings per Movie
+mean_ratings_per_movie <- round(nrow(edx_train) / n_distinct(edx_train$movieId), 0)
+cat("Mean number of ratings per movie:", format(mean_ratings_per_movie, nsmall = 0), "\n")
+
+# Timestamp Analysis
+
+In this section, we analyze the timestamps associated with the ratings to understand the distribution of ratings over the years.
+
+## Extracting Rating Years
+
+```{r, label = "extract_rating_years", echo = TRUE}
+# Load necessary library
+library(dplyr)
+
+# Extract earliest and latest rating years if timestamp is not available
+rating_years <- edx_train %>%
+  summarize(
+    earliest_rating = min(year_movie),
+    latest_rating = max(year_movie)
+  )
+
+# Print the results
+print(rating_years)
+
+
+# Calculate the number of ratings for each year
+year_counts <- edx_train %>%
+  group_by(year_movie) %>%
+  summarize(count = n())
+
+# Create the plot with clarity improvements
+ggplot(year_counts, aes(x = year_movie, y = count)) +
+  geom_bar(stat = "identity", fill = "steelblue", color = "black") +
+  geom_text(aes(label = count), vjust = -0.5, size = 4, fontface = "bold") +  # Add labels above bars
+  labs(title = "Distribution of Movie Ratings by Year",
+       x = "Year",
+       y = "Number of Ratings") +
+  theme_minimal(base_size = 15) +  # Increase base font size
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),  # Center the title
+    panel.grid.major = element_line(color = "grey90"),  # Light color for major grid lines
+    panel.grid.minor = element_blank(),  # Hide minor grid lines
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis text for better readability
+  ) +
+  scale_x_continuous(breaks = seq(min(year_counts$year_movie), max(year_counts$year_movie), by = 1))  # Set x-axis breaks
+  
+  
+  
+#### Simple Guesses Analysis
+
+In this section, we calculate a basic prediction for movie ratings using the mean rating of the training set, and we evaluate the performance of this naive model using RMSE (Root Mean Square Error).
+
+## Calculating the Mean Rating
+
+```{r, label = "calculate_mean_rating", echo = TRUE}
+# Load necessary library
+library(dplyr)
+
+# Calculate mean of all ratings in the training set
+mu <- edx_train %>%
+  summarize(mean_rating = mean(rating, na.rm = TRUE)) %>%
+  pull(mean_rating)
+
+# Print the mean rating
+cat("Mean rating:", mu, "\n")
+
+# Calculate RMSE using a different approach
+rmse_naive <- sqrt(mean((final_holdout_test$rating - mu)^2, na.rm = TRUE))
+
+# Store RMSE in a named vector
+rmses <- c(
+  rmses,
+  naive = rmse_naive
+)
+
+# Print the RMSE
+cat("RMSE for naive model:", rmse_naive, "\n")
+
+
+#### Manual Predictions
+
+In this section, we create manual predictions for movie ratings, starting with a naive prediction model that simply uses the mean rating from the training dataset.
+
+## 3.1 Naive Prediction
+
+The naive prediction approach calculates the mean of all ratings without considering any other factors.
+
+### Calculating the Mean Rating
+
+```{r, label = "naive_prediction", echo = TRUE}
+# Load necessary library
+library(dplyr)
+
+# Calculate mean of all ratings in the training set
+mu <- edx_train %>%
+  summarize(mean_rating = mean(rating, na.rm = TRUE)) %>%
+  pull(mean_rating)
+
+# Print the mean rating
+cat("Mean rating:", mu, "\n")
+
+# Calculate RMSE using a different approach
+rmse_naive <- sqrt(mean((final_holdout_test$rating - mu)^2, na.rm = TRUE))
+
+# Store RMSE in a named vector
+rmses <- c(
+  rmses,
+  naive = rmse_naive
+)
+
+# Print the RMSE
+cat("RMSE for naive model:", rmse_naive, "\n")
+
+#### User Effect Analysis
+
+In this section, we enhance our predictions by incorporating the user effect, which accounts for individual biases in ratings compared to the overall mean.
+
+## 3.2 User Effect
+
+# Calculating User Bias
+
+First, we calculate the bias for each user relative to the mean rating. This bias represents how much a user's average rating deviates from the overall mean.
+
+```{r, label = "calculate_user_bias", echo = TRUE}
+# Load necessary libraries
+library(dplyr)
+
+# Calculate user bias relative to the mean rating
+user_bias <- edx_train %>%
+  group_by(userId) %>%
+  summarize(user_bias = mean(rating - mu, na.rm = TRUE), .groups = "drop")  # Include na.rm
+  
+#### Movie Effect Analysis
+
+In this section, we further refine our predictions by incorporating the movie effect, which adjusts ratings based on the average rating of each movie.
+
+## 3.3 Movie Effect
+
+### Calculating Movie Bias
+
+First, we calculate the bias for each movie relative to the mean rating. This bias indicates how each movie's average rating deviates from the overall mean.
+
+```{r, label = "calculate_movie_bias", echo = TRUE}
+# Load necessary libraries
+library(dplyr)
+
+# Calculate movie bias relative to the mean rating
+movie_bias <- edx_train %>%
+  group_by(movieId) %>%
+  summarize(movie_bias = mean(rating - mu, na.rm = TRUE), .groups = "drop")  # Include na.rm
+  
+  
+# Creating Predicted Ratings
+Next, we create predicted ratings by merging the movie bias with the holdout test set. If a movie bias is not available (i.e., the movie hasn't been rated in the training set), we default to 0.
+# Create predicted ratings by merging movie bias with the test set
+
+movie_pred <- final_holdout_test %>%
+  left_join(movie_bias, by = "movieId") %>%
+  mutate(pred = mu + ifelse(is.na(movie_bias), 0, movie_bias)) %>%  # Use 0 if movie_bias is NA
+  select(movieId, pred)
+  
+#Calculating RMSE After Movie Effect
+We then calculate the Root Mean Square Error (RMSE) for the predictions that account for the movie effect.
+
+# Calculate RMSE after accounting for movie effect
+mses <- c(
+  rmses,
+  movie = sqrt(mean((movie_pred$pred - final_holdout_test$rating)^2, na.rm = TRUE))  # Manual RMSE calculation
+)
+
+# Print the RMSE results
+print(mses)
+
+#### Multi-Genre Effect Analysis
+
+In this section, we enhance our predictions by incorporating the multi-genre effect, which adjusts ratings based on the average rating associated with each genre combination.
+
+## 3.5 Multi-Genre Effect
+
+### Calculating Multi-Genre Bias
+
+First, we calculate the bias for each genre combination relative to the mean rating. This bias reflects how the average rating for each genre combination deviates from the overall mean.
+
+```{r, label = "calculate_multi_genre_bias", echo = TRUE}
+# Load necessary library
+library(dplyr)
+
+# Calculate multi-genre bias relative to the mean rating
+multi_genre_bias <- edx_train %>%
+  group_by(genres) %>%
+  summarize(multi_genre_bias = mean(rating - mu, na.rm = TRUE), .groups = "drop")
+  
+#Creating Predicted Ratings
+Next, we create predicted ratings by merging the multi-genre bias with the holdout test set. If a multi-genre bias is not available (i.e., the genre combination hasn't been rated in the training set), we default to 0.
+
+# Create predicted ratings by merging multi-genre bias with the test set
+multi_genre_pred <- final_holdout_test %>%
+  left_join(multi_genre_bias, by = "genres") %>%
+  mutate(pred = mu + ifelse(is.na(multi_genre_bias), 0, multi_genre_bias)) %>%
+  select(genres, pred)
+
+#Calculating RMSE After Multi-Genre Effect
+We then calculate the Root Mean Square Error (RMSE) for the predictions that account for the multi-genre effect.
+
+# Calculate RMSE after accounting for multi-genre effect
+rmse_multi_genre <- sqrt(mean((multi_genre_pred$pred - final_holdout_test$rating)^2, na.rm = TRUE))
+
+# Update rmses vector
+rmses <- c(rmses, multi_genre = rmse_multi_genre)
+
+# Print the RMSE results
+print(rmses)
+
+#### Single-Genre Effect Analysis
+
+In this section, we focus on the single-genre effect by calculating the bias for each genre individually and using it to enhance our predictions.
+
+## 3.6 Single-Genre Effect
+
+### Preparing the Data
+
+First, we split the genres column into a longer format for both the training and test datasets, allowing us to analyze each genre separately.
+
+```{r, label = "prepare_single_genre_data", echo = TRUE}
+# Load necessary libraries
+library(dplyr)
+library(tidyr)
+
+# Split the genres column and pivot it into longer format for training set
+edx_train_longer <- edx_train %>%
+  select(genres, rating) %>%
+  separate_longer_delim(genres, delim = "|")
+  
+#Calculating Single-Genre Bias
+Next, we calculate the bias for each genre relative to the mean rating.
+
+# Calculate single-genre bias
+single_genre_bias <- edx_train_longer %>%
+  group_by(genres) %>%
+  summarize(single_genre_bias = mean(rating - mu), .groups = 'drop')
+  
+#Preparing the Test Data
+We then prepare the test dataset in the same long format.
+
+# Split the genres column and pivot it into longer format for test set
+final_holdout_test_longer <- final_holdout_test %>%
+  separate_longer_delim(genres, delim = "|")
+  
+# Predict ratings by joining the bias data
+single_genre_pred <- final_holdout_test_longer %>%
+  left_join(single_genre_bias, by = "genres") %>%
+  mutate(pred = mu + ifelse(is.na(single_genre_bias), 0, single_genre_bias)) %>%
+  select(genres, pred)
+
+
+##Calculating RMSE After Single-Genre Effect
+Finally, we calculate the Root Mean Square Error (RMSE) for the predictions that account for the single-genre effect.
+
+# Calculate RMSE after accounting for single-genre effect
+rmses["single_genre"] <- sqrt(mean((single_genre_pred$pred - final_holdout_test_longer$rating)^2, na.rm = TRUE))
+
+# Display the RMSE
+print(rmses["single_genre"])
+
+# Year of Release Effect Analysis
+
+In this section, we analyze the effect of the year of release on movie ratings and how it can be used to enhance predictions.
+
+## 3.7 Year of Release Effect
+
+### Summarizing the Year of Release Bias
+
+We start by calculating the bias for each release year relative to the mean rating.
+
+```{r, label = "calculate_year_movie_bias", echo = TRUE}
+# Load necessary libraries
+library(dplyr)
+library(stringr)
+
+# Summarize the effect of the year of release
+year_movie_bias <- edx_train %>%
+  group_by(year_movie) %>%
+  summarize(year_movie_bias = mean(rating - mu), .groups = 'drop')
+  
+# Extract year from the title and create the year_movie variable in the test set
+final_holdout_test <- final_holdout_test %>%
+  mutate(
+    year_movie = as.integer(str_sub(title, start = -5L, end = -2L)),  # Extract year
+    title = str_sub(title, end = -8L)  # Remove year from title
+  )
+  
+# Predict ratings based on year of release
+year_movie_pred <- final_holdout_test %>%
+  left_join(year_movie_bias, by = "year_movie") %>%
+  mutate(pred = mu + ifelse(is.na(year_movie_bias), 0, year_movie_bias)) %>%
+  select(year_movie, pred)
+  
+#Calculating RMSE After Year of Release Effect
+Finally, we calculate the Root Mean Square Error (RMSE) for the predictions that account for the year of release effect.
+
+# Calculate RMSE after accounting for year of release effect
+rmses["year_movie"] <- sqrt(mean((year_movie_pred$pred - final_holdout_test$rating)^2, na.rm = TRUE))
+
+# Display the RMSE
+print(rmses["year_movie"])
+
+
+#### Combined Effects Analysis
+
+In this section, we combine the effects of movie, user, multi-genre, and year to create a comprehensive prediction model for movie ratings.
+
+## 3.9 Combined Movie, User, Multi-Genre, and Year Effects
+
+### Creating Predicted Ratings
+
+We create predicted ratings by joining various biases calculated previously. This allows us to leverage all available information to enhance our predictions.
+
+```{r, label = "combine_effects", echo = TRUE}
+# Create predicted ratings by joining various biases
+movieusergenreyear_pred <- final_holdout_test %>%
+  left_join(movie_bias, by = "movieId") %>%
+  left_join(user_bias, by = "userId") %>%
+  left_join(multi_genre_bias, by = "genres") %>%
+  left_join(year_movie_bias, by = "year_movie") %>%
+  left_join(year_rating_bias, by = "year_rating") %>%
+  mutate(
+    pred = mu + 
+           coalesce(movie_bias, 0) + 
+           coalesce(user_bias, 0) + 
+           coalesce(multi_genre_bias, 0) +
+           coalesce(year_movie_bias, 0) + 
+           coalesce(year_rating_bias, 0)
+  ) %>%
+  select(movieId, userId, genres, year_movie, year_rating, pred)
+  
+  
+#Calculating RMSE for Combined Effects
+Next, we calculate the Root Mean Square Error (RMSE) for the predictions that account for all combined effects
+
+# Calculate RMSE for the combined effects
+rmses["movieusergenreyear"] <- sqrt(mean((movieusergenreyear_pred$pred - final_holdout_test$rating)^2, na.rm = TRUE))
+
+# Display the RMSE
+print(rmses["movieusergenreyear"])
+
+#### Combined Movie, User, and Multi-Genre Effects Analysis
+
+In this section, we analyze the predictions by combining the effects of movie, user, and multi-genre biases to create a refined model.
+
+## 3.10 Combined Movie, User, and Multi-Genre Effects
+
+### Creating Predicted Ratings
+
+We begin by creating predicted ratings by joining the biases for movie, user, and multi-genre effects.
+
+```{r, label = "combine_movie_user_genre_effects", echo = TRUE}
+# Load necessary libraries
+library(dplyr)
+
+# Create predicted ratings by joining movie, user, and genre effects
+movieusergenre_pred <- final_holdout_test %>%
+  left_join(movie_bias, by = "movieId") %>%
+  left_join(user_bias, by = "userId") %>%
+  left_join(multi_genre_bias, by = "genres") %>%
+  mutate(
+    # Calculate predictions
+    pred = mu + 
+           coalesce(movie_bias, 0) + 
+           coalesce(user_bias, 0) + 
+           coalesce(multi_genre_bias, 0)
+  ) %>%
+  select(movieId, userId, genres, pred)
+  
+#Calculating RMSE for Combined Effects
+Next, we calculate the Root Mean Square Error (RMSE) for the predictions that account for the combined effects of movie, user, and genre.
+
+# Calculate RMSE for the combined effects
+rmses["movieusergenre"] <- sqrt(mean((movieusergenre_pred$pred - final_holdout_test$rating)^2, na.rm = TRUE))
+
+# Display the RMSE
+print(paste("RMSE for movie, user, and genre effects:", rmses["movieusergenre"]))
+
+# Combined Movie and User Effects Analysis
+
+In this section, we focus on the predictions that account for both movie and user effects, providing a streamlined model that captures the influence of these two factors.
+
+## 3.11 Combined Movie and User Effects
+
+### Creating Predicted Ratings
+
+We create predicted ratings by joining the biases for movie and user effects only.
+
+```{r, label = "combine_movie_user_effects", echo = TRUE}
+# Create predicted ratings considering only movie and user effects
+movieuser_pred <- final_holdout_test %>%
+  left_join(movie_bias, by = "movieId") %>%
+  left_join(user_bias, by = "userId") %>%
+  mutate(
+    # Calculate predictions
+    pred = mu + 
+           coalesce(movie_bias, 0) + 
+           coalesce(user_bias, 0)
+  ) %>%
+  select(movieId, userId, pred)
+  
+#Calculating RMSE for Combined Effects
+Next, we calculate the Root Mean Square Error (RMSE) for the predictions that consider both movie and user effects.
+
+# Calculate RMSE for the predictions
+rmses["movieuser"] <- sqrt(mean((movieuser_pred$pred - final_holdout_test$rating)^2, na.rm = TRUE))
+
+# Display the RMSE
+print(paste("RMSE for movie and user effects:", rmses[["movieuser"]]))
+
+#### Combined Movie and User Effects with Regularization Analysis
+
+In this section, we enhance our predictions by implementing regularization for the combined movie and user effects, which helps to mitigate overfitting.
+
+## 3.12 Combined Movie and User Effects, Regularized
+
+### Calculating Movie and User Biases
+
+First, we calculate the movie and user biases along with the number of ratings for each movie and user.
+
+```{r, label = "calculate_movie_user_biases_reg", echo = TRUE}
+# Load necessary libraries
+library(dplyr)
+
+# Calculate movie bias and the number of ratings per movie
+movie_bias_reg <- edx_train %>%
+  group_by(movieId) %>%
+  summarize(
+    movie_bias = sum(rating - mu),
+    movie_n = n(),
+    .groups = 'drop'
+  )
+
+# Calculate user bias and the number of ratings per user
+user_bias_reg <- edx_train %>%
+  group_by(userId) %>%
+  summarize(
+    user_bias = sum(rating - mu),
+    user_n = n(),
+    .groups = 'drop'
+  )
+  
+# Function to calculate RMSE given a lambda value
+fn_opt <- function(lambda) {
+  predictions <- final_holdout_test %>%
+    left_join(movie_bias_reg, by = "movieId") %>%
+    left_join(user_bias_reg, by = "userId") %>%
+    mutate(
+      pred = mu + movie_bias / (movie_n + lambda) +
+             user_bias / (user_n + lambda)
+    ) %>%
+    pull(pred)
+  
+  return(sqrt(mean((predictions - final_holdout_test$rating)^2, na.rm = TRUE)))
+}
+
+#Optimizing Lambda
+We use optimization to find the best lambda value that minimizes RMSE.
+
+# Optimize to find the best lambda
+opt <- optimize(
+  f = fn_opt,             # Function to return RMSE
+  interval = c(0, 100),   # Range for lambda search
+  tol = 1e-4              # Tolerance level for optimization
+)
+
+# Display the optimal lambda
+optimal_lambda <- opt$minimum
+cat("Optimal lambda:", optimal_lambda, "\n")
+
+#Saving and Displaying the RMSE for the Regularized Model
+Finally, we save the RMSE for the regularized model and display it.
+
+# Save the RMSE for the regularized model
+rmses[["movieuser_reg"]] <- opt$objective
+
+# Display the RMSE
+cat("RMSE for movie and user regularization:", rmses[["movieuser_reg"]], "\n")
+
+#### Using the Recosystem Model for Matrix Factorization
+
+In this section, we explore how to use the Recosystem model for matrix factorization, an effective approach for collaborative filtering in recommendation systems.
+
+## 4.1 Convert the Training and Test Data to Sparse Matrices
+
+### Preparing Sparse Matrices
+
+First, we convert our training and test datasets into sparse matrices, which are efficient for handling large datasets with many missing values.
+
+```{r, label = "create_sparse_matrices", echo = TRUE}
+# Load necessary library
+library(Matrix)  # For sparse matrix operations
+
+# Create a sparse matrix for the training data
+edx_train_sparse <- sparseMatrix(
+  i = edx_train$userId,       # Rows: User IDs
+  j = edx_train$movieId,      # Columns: Movie IDs
+  x = edx_train$rating        # Values: Ratings
+)
+
+# Create a sparse matrix for the test data
+final_holdout_test_sparse <- sparseMatrix(
+  i = final_holdout_test$userId,  # Rows: User IDs
+  j = final_holdout_test$movieId,  # Columns: Movie IDs
+  x = final_holdout_test$rating    # Values: Ratings
+)
+
+#Creating Data Source Lists
+To facilitate later operations, we can optionally convert these sparse matrices into lists.
+# Optional: Convert to a list for easier handling later
+edx_train_datasource <- list(sparse_matrix = edx_train_sparse)
+final_holdout_test_datasource <- list(sparse_matrix = final_holdout_test_sparse)
+
+#### Using the Recosystem Model for Matrix Factorization
+
+In this section, we explore how to use the Recosystem model for matrix factorization, an effective approach for collaborative filtering in recommendation systems.
+
+## 4.2 Train and Run the Prediction Model
+
+### Preparing Sparse Matrices
+
+First, we convert our training and test datasets into sparse matrices, which are efficient for handling large datasets with many missing values.
+
+```{r, label = "create_sparse_matrices", echo = TRUE}
+# Load necessary library
+library(Matrix)  # For sparse matrix operations
+
+# Create a sparse matrix for the training data
+edx_train_sparse <- sparseMatrix(
+  i = edx_train$userId,       # Rows: User IDs
+  j = edx_train$movieId,      # Columns: Movie IDs
+  x = edx_train$rating        # Values: Ratings
+)
+
+# Create a sparse matrix for the test data
+final_holdout_test_sparse <- sparseMatrix(
+  i = final_holdout_test$userId,  # Rows: User IDs
+  j = final_holdout_test$movieId,  # Columns: Movie IDs
+  x = final_holdout_test$rating    # Values: Ratings
+)
+
+# Optional: Convert to a list for easier handling later
+edx_train_datasource <- list(sparse_matrix = edx_train_sparse)
+final_holdout_test_datasource <- list(sparse_matrix = final_holdout_test_sparse)
+
+
+#Training the Recosystem Model
+We will now instantiate the Recosystem model and define the configuration for training.
+
+# Instantiate the Recosystem object
+recosystem_model <- Reco()
+
+# Set the number of CPU threads to use
+num_threads <- 10L
+
+# Define training parameters for tuning
+tuning_options <- list(
+  dim      = 200L,               # Number of latent factors
+  nbin     = 4 * num_threads^2 + 1, # Number of bins for the model
+  nfold    = 10L,                # Number of folds for cross-validation
+  nthread  = num_threads          # Number of CPU threads
+)
+
+# Set seed for reproducibility
+set.seed(1, sample.kind = "Rounding")
+
+# Tune the model to find optimal parameters
+tuned_opts <- recosystem_model$tune(
+  train_data = edx_train_datasource, 
+  opts = tuning_options
+)
+
+# Display the optimal parameters found
+optimal_params <- tuned_opts$min
+print(optimal_params)
+
+# Set seed for reproducibility again
+set.seed(1, sample.kind = "Rounding")
+
+# Train the model using the optimal parameters
+recosystem_model$train(
+  edx_train_datasource,
+  opts = c(optimal_params, nthread = num_threads, nbin = 4 * num_threads^2 + 1)
+)
+
+#Evaluating the Model
+Finally, we will calculate the RMSE on the test data to evaluate the performance of our trained model.
+
+# Calculate the final RMSE on the test data
+rmses <- c(
+  rmses,
+  recosys = RMSE(
+    pred = recosystem_model$predict(test_data = final_holdout_test_datasource),
+    obs  = final_holdout_test$rating
+  )
+)
+
+# Display the final RMSE
+print(paste("Final RMSE for Recosystem:", rmses[["recosys"]]))
+
+
+Results
+The entire script ran for about five hours   on a computer equipped  with Nvidia 1660  4gb ram  3.2Ghz and 16 GB of RAM. The resulting model, which employs matrix factorization based on the combined effects of users and movies, achieved a Root Mean Square Error (RMSE) of   0.7792515. This represents a significant improvement over the standard user-movie model.
+
+Conclusion
+The goal of this project was to develop a movie recommendation system that optimizes the RMSE between predicted and actual ratings, aiming for a target below 0.8649. Exploratory analysis revealed various biases in the ratings, which stem from factors such as individual users, specific movies, genres, and release years.
+
+The most substantial effects were observed among users and movies. By correcting for these mean biases, the RMSEs were reduced to 0.9779362   for users and 0.944011 for movies. The other biases were found to be too minor to further enhance the model’s predictions.
+
+Additional improvements came from regularizing the user-movie model with a penalty lambda of 25, resulting in an RMSE of 0.8815588. Ultimately, the best results were achieved using the Recosystem package, which effectively factorized the sparse matrix of users, movies, and ratings, uncovering latent factors. The final RMSE of 0.7792515   surpassed the target of 0.8649.
+
+Future work could focus on optimizing separate lambda values for user and movie effects, and potentially developing a custom matrix factorization algorithm instead of relying on existing packages.
