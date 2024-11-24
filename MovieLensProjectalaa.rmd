@@ -3,8 +3,8 @@ title:       "MovieLens Project Report"
 author:      "Bouchikhi Alaa Eddine"
 date:        "november 2024 "
 output:      pdf_document
-fig_caption: yes
----
+
+---------------------------------------------------------------------------------------------------------------
 
 To start our analysis, we need to install and load essential R packages. Below is the code for this setup:
 
